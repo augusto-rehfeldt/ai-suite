@@ -285,6 +285,19 @@ class ArrowMenuTests(unittest.TestCase):
         # m00 -> m01, Tab to reversed order (cursor stays on m01), Up -> m02
         self.assertEqual(self._run("\xe0P\t\xe0H\r", default="", sorts=sorts), "m02")
 
+    def test_loading_label_stays_on_the_last_row_and_is_erased(self):
+        import io
+        screen = io.StringIO()
+        screen.isatty = lambda: True
+        with patch.object(cli.sys, "stdout", screen), patch.object(cli.os, "system"), \
+                patch.dict(os.environ, {"NO_COLOR": "1"}):
+            with cli._loading("Zen models"):
+                print("Using the OpenCode CLI")  # output while fetching
+            self.assertIs(cli.sys.stdout, screen)
+        out = screen.getvalue()
+        self.assertEqual(out, "Loading Zen models...\r\033[KUsing the OpenCode CLI\n"
+                              "Loading Zen models...\r\033[K")
+
     def test_off_a_console_it_returns_none(self):
         with patch.object(cli.sys, "stdin", Mock(isatty=Mock(return_value=False))):
             self.assertIsNone(cli._arrow_menu("Models:", self.ROWS, "m03"))
