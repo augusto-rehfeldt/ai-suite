@@ -39,7 +39,11 @@ Intelligence Index (`providers._intelligence`, cached a day in
 `ctx | $in/$out | AA -> aggregate`: `_scales` puts each metric on 0..1 across the menu
 (log for context and output price) and averages them into the aggregate (missing = 0);
 `_gradient` colors each from red (kept bright for low vision) to bright green in 24-bit color. `_pick_model`
-sorts by price first; Tab on a Windows console re-sorts by context, AA, then aggregate.
+sorts by price first. On a Windows console the provider and model menus are
+`_arrow_menu`: `MENU_ROWS` (20) rows at a time with scrolling, the default preselected,
+Up/Down or W/S, PgUp/PgDn move, Space selects/deselects, Enter confirms (the cursor row if
+nothing is selected), Esc keeps the default, Tab re-sorts by context, AA, then
+aggregate. Off a console (piped, non-Windows) they fall back to the typed numbered menu.
 
 - `claude` — the Claude Code CLI in print mode, on the user's subscription, no
   key. The prompt goes in **on stdin, never in argv**: Windows caps a command

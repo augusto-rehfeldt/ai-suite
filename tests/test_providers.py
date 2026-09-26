@@ -251,5 +251,44 @@ class CatalogueTests(unittest.TestCase):
         self.assertNotIn("x-opencode-session", other._extra_headers())
 
 
+class ArrowMenuTests(unittest.TestCase):
+    ROWS = [(f"m{i:02d}", f"model {i}") for i in range(30)]
+
+    def _run(self, keys: str, default: str = "m03", **kw) -> str:
+        msvcrt = Mock(getwch=Mock(side_effect=list(keys)))
+        tty = Mock(isatty=Mock(return_value=True))
+        with patch.object(cli.os, "name", "nt"), patch.object(cli.os, "system"), \
+                patch.dict("sys.modules", {"msvcrt": msvcrt}), \
+                patch.object(cli.sys, "stdin", tty), patch.object(cli.sys, "stdout", tty), \
+                patch("builtins.print") as out:
+            picked = cli._arrow_menu("Models:", self.ROWS, default, **kw)
+        frames = [c.args[0] for c in out.call_args_list if "Models:" in c.args[0]]
+        self.assertTrue(frames)
+        self.assertTrue(all(f.count("] model") <= cli.MENU_ROWS for f in frames))
+        return picked
+
+    def test_enter_takes_the_preselected_default(self):
+        self.assertEqual(self._run("\r"), "m03")
+
+    def test_scrolls_past_the_window_and_space_moves_the_selection(self):
+        self.assertEqual(self._run("\xe0P" * 22 + " \r"), "m25")
+        self.assertEqual(self._run("s" * 23 + "W \r"), "m25")  # W/S move like Up/Down
+
+    def test_deselecting_falls_back_to_the_cursor_row(self):
+        self.assertEqual(self._run(" \xe0P\r"), "m04")        # unmark m03, move, Enter
+        self.assertEqual(self._run(" \xe0P\xe0H \r"), "m03")  # unmark, move back, re-mark
+
+    def test_escape_keeps_the_default_and_tab_keeps_the_cursor_row(self):
+        self.assertEqual(self._run("\xe0P\x1b"), "m03")
+        ids = [m for m, _ in self.ROWS]
+        sorts = [("a", ids), ("z", ids[::-1])]
+        # m00 -> m01, Tab to reversed order (cursor stays on m01), Up -> m02
+        self.assertEqual(self._run("\xe0P\t\xe0H\r", default="", sorts=sorts), "m02")
+
+    def test_off_a_console_it_returns_none(self):
+        with patch.object(cli.sys, "stdin", Mock(isatty=Mock(return_value=False))):
+            self.assertIsNone(cli._arrow_menu("Models:", self.ROWS, "m03"))
+
+
 if __name__ == "__main__":
     unittest.main()
