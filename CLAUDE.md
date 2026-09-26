@@ -85,7 +85,7 @@ aggregate. Off a console (piped, non-Windows) they fall back to the typed number
 ## Shared service contract
 
 This AIService is the workspace's one AI suite. Consumers: book writer, music writer, mathforge,
-bandido, impostor, book-watch, lamplight, article-writer (via book writer's aliases), the calibre summarizer, Story Atlas and youtube-explainer (see
+bandido, impostor, book-watch, lamplight, article-writer (via book writer's aliases), the calibre summarizer, Shelfscape and youtube-explainer (see
 the workspace README's contract section). Expose options on AIService, not
 private-method or SDK monkeypatches, and add them test-first in
 `tests/test_shared_consumers.py` / `tests/test_shared_portable.py` here. Public:

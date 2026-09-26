@@ -1,7 +1,7 @@
 # ai-suite
 
 Shared AI client for a family of scripts (book writer, mathforge, book-watch, lamplight,
-the Calibre summarizer, Story Atlas and others): one `AIService` with every provider
+the Calibre summarizer, Shelfscape and others): one `AIService` with every provider
 transport (OpenAI-compatible gateways, OpenAI OAuth proxy, Gemini, Groq, the Claude Code,
 Command Code and OpenCode CLIs), usage-limit handling, retries and token accounting, plus
 the interactive provider/model menu.

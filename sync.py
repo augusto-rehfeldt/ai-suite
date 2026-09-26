@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 PACKAGE = HERE / "ai_suite"
 # Consumers with their own GitHub repository; the rest import the sibling checkout only.
 TARGETS = ("book writer", "book-watch", "calibre-book-summarizer", "lamplight", "mathforge",
-           "semantic-story-atlas")
+           "shelfscape")
 # Local secrets, runtime state and caches never travel, and a copy's own are never touched.
 SKIP = ("*.local.json", "*state*.json", "__pycache__", "*.pyc")
 
