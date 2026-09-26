@@ -13,6 +13,20 @@ provider, config, models = choose_ai(state_file=Path("provider_state.json"))
 text = AIService(config_path=config).generate_content("Hello", system="Be brief.")
 ```
 
+## The menu
+
+On a Windows console `choose_ai` asks for the provider, then one model per role, with
+arrow-key menus: 20 rows at a time with scrolling, the remembered pick preselected.
+Up/Down or W/S move, Space selects or deselects, Enter confirms (the row under the cursor
+if nothing is selected), Esc keeps the default, Tab re-sorts models by price, context,
+Artificial Analysis index or aggregate score. A "Loading … models" line holds the
+bottom row while catalogues are fetched. Piped or off Windows it is a typed numbered
+menu; `mode="auto"` asks nothing and reuses the last picks.
+
+Model rows read `ctx | $in/$out | AA -> score` from models.dev and, with
+`ARTIFICIAL_ANALYSIS_API_KEY`, the Artificial Analysis index. Defaults worth knowing:
+`claude` writes on `claude-opus-5-5`, `openai-oauth` on `gpt-6-sol`.
+
 ## Install
 
 - Next to its consumers: keep this checkout beside them as `ai-suite/` (or set
