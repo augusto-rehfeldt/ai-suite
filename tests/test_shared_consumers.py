@@ -86,6 +86,10 @@ class FailFastTests(unittest.TestCase):
                 self.client(boom).generate_content("p", wait_for_limits=False)
         sleep.assert_not_called()
 
+    def test_claude_cli_bad_model_notice_is_an_error_not_text(self):
+        with self.assertRaisesRegex(RuntimeError, "selected model"):
+            self.client("There's an issue with the selected model (x). It may not exist.").generate_content("p")
+
     def test_normal_text_is_returned(self):
         self.assertEqual(self.client("fine").generate_content("p", wait_for_limits=False), "fine")
 
@@ -115,6 +119,20 @@ class ChatOptionTests(unittest.TestCase):
         service.client.chat = type("Chat", (), {})()
         service.client.chat.completions = type("Completions", (), {"create": staticmethod(create)})()
         return service, calls
+
+    def test_dead_model_or_empty_account_fails_without_retrying(self):
+        missing = RuntimeError("Error code: 404 - model not found: x")
+        missing.status_code = 404
+        for error in (missing, RuntimeError("Upstream request failed: Insufficient account funds")):
+            with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {"HYPER_API_KEY": "k"}):
+                service, calls = self.service(folder, [])
+                def create(**kwargs):
+                    calls.append(kwargs)
+                    raise error
+                service.client.chat.completions.create = create
+                with self.assertRaises(RuntimeError):
+                    service.generate_content("hi", max_retries=4)
+            self.assertEqual(len(calls), 1, error)
 
     def test_system_and_temperature_reach_chat_endpoints(self):
         reply = type("R", (), {"choices": [type("C", (), {"message": type("M", (), {"content": "ok"})(),
