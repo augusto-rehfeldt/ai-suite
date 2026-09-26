@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-suite"
+version = "1.0.0"
+description = "Shared AIService and provider/model menu for the workspace's AI scripts"
+requires-python = ">=3.10"
+# The core imports on the standard library alone; these unlock the SDK clients.
+optional-dependencies = { sdk = ["requests", "openai", "google-genai"] }
+
+[tool.setuptools]
+packages = ["ai_suite"]
+
+[tool.setuptools.package-data]
+ai_suite = ["config/ai_config_*.json"]
+
+[tool.setuptools.exclude-package-data]
+ai_suite = ["config/*.local.json", "config/*state*.json"]
