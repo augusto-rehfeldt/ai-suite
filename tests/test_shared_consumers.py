@@ -144,6 +144,16 @@ class ChatOptionTests(unittest.TestCase):
                                                 {"role": "user", "content": "hi"}])
         self.assertEqual(calls[0]["temperature"], 0.0)
 
+    def test_oauth_never_sends_temperature(self):
+        # ChatGPT's backend rejects it: the proxy drops the stream mid-body.
+        reply = type("R", (), {"choices": [type("C", (), {"message": type("M", (), {"content": "ok"})(),
+                                                           "finish_reason": "stop"})()]})()
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {"HYPER_API_KEY": "k"}):
+            service, calls = self.service(folder, [reply])
+            service.provider = "openai-oauth"
+            self.assertEqual(service.generate_content("hi", temperature=0.8), "ok")
+        self.assertNotIn("temperature", calls[0])
+
     def test_last_usage_is_what_the_provider_reported(self):
         usage = type("U", (), {"prompt_tokens": 12, "completion_tokens": 5})()
         reply = type("R", (), {"usage": usage, "choices": [type("C", (), {
