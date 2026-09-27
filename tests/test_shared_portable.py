@@ -6,8 +6,10 @@ from its own provider rows, so these behaviours are part of the shared contract.
 """
 import http.server
 import importlib
+import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -203,10 +205,26 @@ class CliIsolationTests(unittest.TestCase):
                 patch.object(api, "opencode_executable", return_value="opencode"):
             proc = popen.return_value
             proc.communicate.return_value, proc.returncode = (stdout, ""), returncode
+            # the watched (abort=) path reads the pipes itself instead of communicate()
+            proc.stdout, proc.stderr = io.StringIO(stdout), io.StringIO("")
             result = fn("model", "the prompt", timeout=5, **kwargs)
         call = popen.call_args
+        sent = proc.communicate.call_args or proc.stdin.write.call_args
         # one call-shaped record: Popen's arguments plus what went in on stdin
-        return result, Mock(args=call.args, kwargs=dict(call.kwargs, input=proc.communicate.call_args.args[0]))
+        return result, Mock(args=call.args, kwargs=dict(call.kwargs, input=sent.args[0]))
+
+    def test_a_logged_error_the_cli_retries_silently_ends_the_run(self):
+        # OpenCode logs a free-tier 429 and retries forever with no output event.
+        script = ("import sys, time; sys.stderr.write('stream error: Rate limit exceeded\\n'); "
+                  "sys.stderr.flush(); time.sleep(60)")
+        started = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, "^Rate limit exceeded$"):
+            api._run_cli([sys.executable, "-c", script], "", timeout=30, abort=re.compile(r"stream error: (.*)"))
+        self.assertLess(time.monotonic() - started, 20)
+        line = ('level=ERROR message="stream error" modelID=m small=false agent=build '
+                'error.error="AI_APICallError: Rate limit exceeded."')
+        self.assertEqual(api.OPENCODE_STREAM_ERROR_RE.search(line)[1], "AI_APICallError: Rate limit exceeded.")
+        self.assertIsNone(api.OPENCODE_STREAM_ERROR_RE.search(line.replace("small=false", "small=true")))
 
     def test_a_timeout_kills_the_whole_process_tree(self):
         # The child spawns a grandchild that inherits the output pipes, like a .cmd

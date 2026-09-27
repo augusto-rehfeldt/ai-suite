@@ -64,7 +64,11 @@ aggregate. Off a console (piped, non-Windows) they fall back to the typed number
   bare config (`OPENCODE_BARE_CONFIG`) whose permissions are all `ask`, which a
   headless run auto-rejects; that also keeps the user's global AGENTS.md and
   plugins out of replies. `plan` was dropped: its reminder made models answer
-  with a plan instead of the draft. A 403 is never retried. With `stream` on,
+  with a plan instead of the draft. A 403 is never retried. On a gateway error
+  (free-tier "Rate limit exceeded") OpenCode logs it and retries forever without an
+  event, so it runs with `--print-logs` and `_run_cli(abort=OPENCODE_STREAM_ERROR_RE)`
+  kills it on the answering model's stream error; `generate_content`'s limit wait
+  takes over. With `stream` on,
   `timeout` is per chunk, so CLI calls get at least `CLI_TIMEOUT` (1800s) wall clock.
 - `hyper` — hyper.charm.land, OpenAI-compatible (`HYPER_API_KEY`). Send it
   `max_tokens`, not `max_completion_tokens`; the newer spelling is a 400.
