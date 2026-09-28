@@ -34,6 +34,12 @@ class IntelligenceMatchTests(unittest.TestCase):
             self.assertIsNone(cli._intelligence("gpt-5.1-codex-max"))
             self.assertIsNone(cli._intelligence("glm-5"))
 
+    def test_glued_family_versions_match_spaced_ones(self):
+        """AA writes qwen3-5, gpt4free writes qwen-3.5: the same model."""
+        entries = [{"slug": "qwen3-5-397b-a17b", "evaluations": {"artificial_analysis_intelligence_index": 45}}]
+        with patch.object(cli, "_artificial_analysis", return_value=entries):
+            self.assertEqual(cli._intelligence("qwen-3.5-397b-a17b"), 45)
+
 
 if __name__ == "__main__":
     unittest.main()

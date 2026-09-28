@@ -13,6 +13,10 @@ provider, config, models = choose_ai(state_file=Path("provider_state.json"))
 text = AIService(config_path=config).generate_content("Hello", system="Be brief.")
 ```
 
+Pass `log=callback` to `AIService` to route service diagnostics and OAuth startup
+output to your own status display. The callback receives one string per message;
+omitting it keeps normal console logging. Generation failures still raise.
+
 ## The menu
 
 On a Windows console `choose_ai` asks for the provider, then one model per role, with
@@ -41,6 +45,18 @@ Provider keys go in `.env` here (or the environment); per-provider overrides wit
 in `ai_suite/config/ai_config_<provider>.local.json`. Neither is ever committed.
 
 ## Checks
+
+Windows helper processes (CLI completions, OAuth startup and model listing) use
+`CREATE_NO_WINDOW`; menu ANSI setup uses the console API rather than a shell.
+Interactive authentication can still require browser sign-in.
+
+The `cc` protocol adapter uses `AIService.chat_completion_response(payload)`
+with an explicit `provider="http"` configuration. This gateway-only API returns
+an open urllib response; use it as a context manager and translate its JSON or
+SSE yourself. It preserves tools and usage without retries or output rewriting.
+It does not apply the text-generation budgeting/retry policy; managed OpenAI and
+Groq providers cannot use it. Explicit ledger paths in `config_overrides` beat
+environment paths, including empty paths for stateless HTTP gateways.
 
 ```
 python -B -m unittest discover -s tests -q

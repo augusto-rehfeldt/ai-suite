@@ -23,9 +23,11 @@ usage state never get committed anywhere.
 `providers.CATALOGUE_PROVIDERS` also picks a model from that config's `models` block
 and remembers it in the caller's state file (default `provider_state.json` here).
 At menu time `providers._live_model_ids` asks the provider what it serves
-(`/models`, or `cmdc --list-models`) and hides curated ids it has retired;
-served ids missing from the config join the menu when models.dev reports their
-output limit. Offline, the curated list shows as is.
+(`/models`; `cmdc --list-models` and `opencode models opencode` for the CLI providers,
+cached a day) and hides curated ids it has retired; served ids missing from the config
+join the menu when models.dev reports their output limit, and always for `CLI_PROVIDERS`.
+Zen uses OpenCode's listing because the gateway's `/models` keeps naming retired free
+models. Offline, the curated list shows as is.
 `providers.choose_ai` is the one provider/model menu for every AIService script:
 mathforge and music writer call it with their own state file and roles.
 opencode.ai rejects calls without an `x-opencode-session` header;
@@ -43,7 +45,8 @@ sorts by price first. On a Windows console the provider and model menus are
 `_arrow_menu`: `MENU_ROWS` (20) rows at a time with scrolling, the default preselected,
 Up/Down or W/S, PgUp/PgDn move, Space selects/deselects, Enter confirms (the cursor row if
 nothing is selected), Esc keeps the default, Tab re-sorts by context, AA, then
-aggregate. Off a console (piped, non-Windows) they fall back to the typed numbered menu.
+aggregate. `multi=True` picks an ordered list (comma-joined; article-writer's backups).
+Off a console (piped, non-Windows) they fall back to the typed numbered menu.
 
 - `claude` — the Claude Code CLI in print mode, on the user's subscription, no
   key. The prompt goes in **on stdin, never in argv**: Windows caps a command
@@ -76,6 +79,28 @@ aggregate. Off a console (piped, non-Windows) they fall back to the typed number
   Takes the older `max_tokens` spelling like hyper. Its `judge_models` are
   grok models because that is all the endpoint serves — same-family judges,
   so treat their humanness verdicts as weak signal there.
+- `gpt4free` — config provider `openrouter` pointed at a local `g4f api` server
+  (`pip install -U "g4f[api]"`, then `g4f api`; `http://127.0.0.1:1337/v1`), `max_tokens`
+  spelling. Keyless unless the server was started with `--g4f-api-key` (`G4F_API_KEY`):
+  g4f passes any other Bearer token to its backends as their API key. Its `/v1/models`
+  also lists each backend (`provider: true`); `_live_model_ids` skips those and image
+  models. g4f names models its own way (`qwen-3-235b`), so `_gpt4free_facts` matches
+  them to models.dev by name shape (maker's own listing first) and shows them free.
+  The curated list tracks g4f 8.5.x; an older install serves none of it.
+- Free tiers, all config provider `openrouter` with their own key variable and `max_tokens`:
+  `cerebras` (`CEREBRAS_API_KEY`), `mistral` (`MISTRAL_API_KEY`), `cloudflare`
+  (`CLOUDFLARE_API_TOKEN`; put your account id in `ai_config_cloudflare.local.json`'s
+  `base_url`; the catalogue lists only models the Workers Free plan answers, and Cloudflare
+  has no `/models`), `sambanova` (`SAMBANOVA_API_KEY`), `chutes` (`CHUTES_API_KEY`; pay as
+  you go, no free tier). Catalogue `max_output` values come from each provider's `/models`
+  (SambaNova caps DeepSeek at 7168). SambaNova and Chutes ids are case-sensitive: the menu
+  lowercases picks and `AIService` restores the config's spelling for any id its `models`
+  lists. `pollinations` (`POLLINATIONS_API_KEY`, `gen.pollinations.ai`) bills in pollen from
+  a daily free grant; out of pollen it answers 200 with "doesn't have enough credits",
+  which `REFUSAL_RE` turns into an error. Its catalogue skips paid-pollen-only models. `ollama`
+  (127.0.0.1:11434) and `lmstudio` (127.0.0.1:1234) are keyless local servers in
+  `LOCAL_PROVIDERS`: their menu lists whatever the server has loaded, capped at
+  `LOCAL_MAX_OUTPUT` when models.dev can't size it.
 - Every request asks for the model's whole output allowance: the config's
   `models[<id>].max_output` (`_max_output`) when the catalogue lists the model,
   else the larger of the caller's `max_completion_tokens` and the role default.
@@ -93,7 +118,8 @@ bandido, impostor, book-watch, lamplight, article-writer (via book writer's alia
 the workspace README's contract section). Expose options on AIService, not
 private-method or SDK monkeypatches, and add them test-first in
 `tests/test_shared_consumers.py` / `tests/test_shared_portable.py` here. Public:
-`allow_auth_prompt`, `client_max_retries`, `config_overrides` (merged over the file,
+`allow_auth_prompt`, `client_max_retries`, `log` (optional per-instance diagnostic callback;
+normal console output remains the default), `config_overrides` (merged over the file,
 explicit `api_key` wins; config-only when no file, then `provider` is required),
 `providers.provider_config_path`, `set_reasoning_effort(writing, review)`,
 `generate_content(system=, temperature=, wait_for_limits=)`, `embed()` and `last_usage`.

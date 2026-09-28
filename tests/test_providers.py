@@ -138,6 +138,10 @@ class ProviderLabelTests(unittest.TestCase):
         self.assertEqual(service.provider_label, "openrouter")
 
 
+FREE_TIER_PROVIDERS = ("cerebras", "mistral", "cloudflare", "sambanova", "chutes", "pollinations",
+                       "ollama", "lmstudio")
+
+
 class CatalogueTests(unittest.TestCase):
     def test_every_provider_has_a_config_that_names_the_same_provider(self):
         for provider, path in cli.PROVIDER_CONFIG_MAP.items():
@@ -147,7 +151,8 @@ class CatalogueTests(unittest.TestCase):
                 continue          # *.local.json files are gitignored user copies
             data = json.loads((base if base.exists() else local).read_text(encoding="utf-8"))
             expected = {"opencode-go": "openrouter", "opencode-zen": "opencode",
-                        "nvidia": "openrouter"}.get(provider, provider)
+                        "nvidia": "openrouter", "gpt4free": "openrouter"}.get(
+                provider, "openrouter" if provider in FREE_TIER_PROVIDERS else provider)
             self.assertEqual(data["provider"], expected, provider)
 
     def test_catalogue_models_are_listed_for_claude_and_hyper(self):
@@ -251,6 +256,77 @@ class CatalogueTests(unittest.TestCase):
         self.assertNotIn("x-opencode-session", other._extra_headers())
 
 
+class PublicProviderOptionsTests(unittest.TestCase):
+    def test_options_expose_the_complete_ordered_catalogue(self):
+        options = cli.provider_options()
+        self.assertEqual(list(options), list(cli.PROVIDER_CONFIG_MAP))
+        self.assertIn("commandcode", options)
+        self.assertEqual(options["commandcode"]["provider"], "commandcode")
+        self.assertIn("deepseek/deepseek-v4-pro", options["commandcode"]["models"])
+        self.assertEqual(options["commandcode"]["writing_model"], "deepseek/deepseek-v4-pro")
+        self.assertFalse(options["commandcode"]["needs_api_key"])
+
+    def test_options_read_configs_only_and_never_ask_providers(self):
+        # Consumers call this at import time; a live listing there costs seconds per provider.
+        with patch.object(cli, "_live_model_ids", side_effect=AssertionError("live call")), \
+             patch.object(cli, "_CATALOGUE_CACHE", {}):
+            options = cli.provider_options()
+        self.assertIn("claude-sonnet-5", options["commandcode"]["models"])
+
+
+class Gpt4freeTests(unittest.TestCase):
+    """gpt4free's local `g4f api` server: OpenAI-compatible, its own model names."""
+
+    def test_config_targets_the_local_server_without_a_real_key(self):
+        self.assertIn("gpt4free", cli.CATALOGUE_PROVIDERS)
+        data = json.loads(Path(cli.PROVIDER_CONFIG_MAP["gpt4free"]).read_text(encoding="utf-8"))
+        self.assertEqual(data["token_param"], "max_tokens")  # g4f's request model has no other
+        self.assertIn(data["writing_model"], data["models"])
+        env = {k: v for k, v in os.environ.items() if k != "G4F_API_KEY"}
+        with patch.dict(os.environ, env, clear=True):
+            service = _service(data)
+        self.assertEqual(service.base_url, "http://127.0.0.1:1337/v1")
+        # g4f hands any other Bearer token to its backends as their key, so never
+        # send another provider's: G4F_API_KEY (the server's own) or nothing.
+        self.assertEqual(service.api_key, "")
+
+    def test_live_listing_skips_provider_and_image_entries(self):
+        """/v1/models lists every g4f backend as a "model" (provider: true) too."""
+        body = json.dumps({"data": [
+            {"id": "deepseek-v4-pro", "image": False, "provider": False},
+            {"id": "flux", "image": True, "provider": False},
+            {"id": "PollinationsAI", "image": True, "provider": True},
+        ]}).encode()
+        resp = Mock(read=Mock(return_value=body))
+        resp.__enter__ = Mock(return_value=resp)
+        resp.__exit__ = Mock(return_value=False)
+        with patch.object(cli, "urlopen", return_value=resp):
+            self.assertEqual(cli._live_model_ids("gpt4free"), {"deepseek-v4-pro"})
+
+    def test_g4f_names_find_their_models_dev_entry_and_show_free(self):
+        catalogue = {
+            "openrouter": {"models": {
+                "openai/gpt-4o": {"limit": {"context": 1, "output": 1}},
+                "meta-llama/llama-3.3-70b-instruct": {"limit": {"context": 131072, "output": 16384}},
+            }},
+            "openai": {"models": {"gpt-4o": {"limit": {"context": 128000, "output": 16384},
+                                             "cost": {"input": 2.5, "output": 10}}}},
+            "groq": {"models": {"llama-3.3-70b-versatile": {"limit": {"context": 9, "output": 9}}}},
+            "alibaba": {"models": {"qwen3-235b-a22b": {"limit": {"context": 131072, "output": 32768}}}},
+        }
+        cli._models_dev_index.cache_clear()
+        try:
+            with patch.object(cli, "_models_dev", return_value=catalogue),                     patch.object(cli, "_artificial_analysis", return_value=[]),                     patch.dict(os.environ, {"NO_COLOR": "1"}):
+                # The maker's own listing beats a reseller's copy of the same id.
+                self.assertEqual(cli._facts_label(cli._model_facts("gpt4free", "gpt-4o")),
+                                 "ctx 128K | free")
+                self.assertEqual(cli._model_facts("gpt4free", "qwen-3-235b")["limit"]["output"], 32768)
+                self.assertEqual(cli._model_facts("gpt4free", "llama-3.3-70b")["limit"]["context"], 131072)
+                self.assertEqual(cli._model_facts("gpt4free", "flux"), {})
+        finally:
+            cli._models_dev_index.cache_clear()
+
+
 class ArrowMenuTests(unittest.TestCase):
     ROWS = [(f"m{i:02d}", f"model {i}") for i in range(30)]
 
@@ -285,6 +361,13 @@ class ArrowMenuTests(unittest.TestCase):
         # m00 -> m01, Tab to reversed order (cursor stays on m01), Up -> m02
         self.assertEqual(self._run("\xe0P\t\xe0H\r", default="", sorts=sorts), "m02")
 
+    def test_multi_keeps_pick_order_and_allows_none(self):
+        # m03,m05 preselected; toggle m03 off, move to m06 and pick it: order is pick order
+        self.assertEqual(self._run(" " + "\xe0P" * 3 + " \r", default="m03,m05", multi=True),
+                         "m05,m06")
+        self.assertEqual(self._run(" \r", default="m03", multi=True), "")
+        self.assertEqual(self._run("\x1b", default="m03,m05", multi=True), "m03,m05")
+
     def test_loading_label_stays_on_the_last_row_and_is_erased(self):
         import io
         screen = io.StringIO()
@@ -305,3 +388,35 @@ class ArrowMenuTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CliCatalogueTests(unittest.TestCase):
+    CMDC = ("Available models  ·  3 models\n\nOpen Source\n\n"
+            "deepseek/deepseek-v4.1-flash           V4.1 reasoning\n"
+            "claude-sonnet-5                        Anthropic\n\n  footer text here\n")
+
+    def test_commandcode_listing_skips_headings(self):
+        with patch.object(cli, "_cli_listing", return_value=self.CMDC):
+            self.assertEqual(cli._live_model_ids("commandcode"), {"deepseek/deepseek-v4.1-flash", "claude-sonnet-5"})
+
+    def test_zen_uses_opencode_cli_listing(self):
+        """The gateway's /models still names retired free models; OpenCode's CLI does not."""
+        with patch.object(cli, "_cli_listing", return_value="opencode/big-pickle\nopencode/Nemotron-3-Ultra-Free\n"):
+            self.assertEqual(cli._live_model_ids("opencode-zen"), {"big-pickle", "nemotron-3-ultra-free"})
+
+    def test_cli_providers_list_every_served_model(self):
+        for provider, served in (("commandcode", {"claude-sonnet-5", "deepseek/deepseek-v4-pro", "new/unknown-model"}),
+                                 ("opencode-zen", {"big-pickle", "brand-new-free"})):
+            with self.subTest(provider=provider), patch.object(cli, "_live_model_ids", return_value=served), \
+                    patch.object(cli, "_model_facts", return_value={}):
+                models = cli._load_catalogue(provider)
+            self.assertEqual(set(models), served)
+
+    def test_commandcode_plan_refusal_is_not_retried_and_updates_stay_out(self):
+        refused = subprocess.CompletedProcess([], 4, stdout="", stderr="Error: 403 MODEL_NOT_IN_PLAN")
+        with patch.object(ai_service, "commandcode_executable", return_value="cmdc"), \
+                patch.object(ai_service, "_run_cli", return_value=refused) as run:
+            with self.assertRaises(RuntimeError) as caught:
+                ai_service.commandcode_chat("claude-sonnet-5", "hi")
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertIn("--no-auto-update", run.call_args.args[0])

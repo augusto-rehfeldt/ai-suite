@@ -90,6 +90,11 @@ class FailFastTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "selected model"):
             self.client("There's an issue with the selected model (x). It may not exist.").generate_content("p")
 
+    def test_pollinations_out_of_credit_reply_is_an_error_not_text(self):
+        with self.assertRaisesRegex(RuntimeError, "enough credits"):
+            self.client("The account behind this API key doesn't have enough credits. This model needs "
+                        "paid Pollen.").generate_content("p")
+
     def test_normal_text_is_returned(self):
         self.assertEqual(self.client("fine").generate_content("p", wait_for_limits=False), "fine")
 
@@ -239,12 +244,36 @@ class NvidiaProviderTests(unittest.TestCase):
         self.assertEqual(data["api_key_env"], "NVIDIA_API_KEY")
         self.assertIn(data["writing_model"], data["models"])
         with patch.object(cli, "_live_model_ids", return_value=None):
-            self.assertIn("deepseek-ai/deepseek-v4-pro", cli._provider_models("nvidia"))
+            self.assertIn("moonshotai/kimi-k3", cli._provider_models("nvidia"))
         with patch.dict(os.environ, {"NVIDIA_API_KEY": "nv-key"}):
             service = api.AIService(cli.provider_config_path("nvidia"), allow_auth_prompt=False)
         self.assertEqual((service.api_key, service.base_url, service.provider_label),
                          ("nv-key", "https://integrate.api.nvidia.com/v1", "integrate.api.nvidia.com"))
 
+
+
+class FreeTierProviderTests(unittest.TestCase):
+    def test_free_tier_providers_use_only_their_own_key(self):
+        for provider in ("cerebras", "mistral", "cloudflare", "sambanova", "chutes", "pollinations",
+                         "ollama", "lmstudio"):
+            data = json.loads(Path(cli.provider_config_path(provider)).read_text(encoding="utf-8"))
+            if provider in cli.CATALOGUE_PROVIDERS:
+                self.assertIn(data["writing_model"], data["models"], provider)
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "other", data["api_key_env"]: "own"}):
+                service = api.AIService(cli.provider_config_path(provider), allow_auth_prompt=False)
+            self.assertEqual((service.api_key, service.base_url), ("own", data["base_url"]), provider)
+
+    def test_lowercased_menu_picks_go_out_in_the_configs_spelling(self):
+        with patch.dict(os.environ, {"AI_WRITING_MODEL": "minimax-m3", "AI_REVIEW_MODEL": "deepseek-v3.2"}):
+            service = api.AIService(cli.provider_config_path("sambanova"), allow_auth_prompt=False)
+        self.assertEqual((service.writing_model, service.review_model), ("MiniMax-M3", "DeepSeek-V3.2"))
+        self.assertEqual(service._max_output("DeepSeek-V3.2"), 7168)
+
+    def test_local_servers_offer_every_loaded_model(self):
+        with patch.object(cli, "_live_model_ids", return_value={"qwen3:32b"}),                 patch.object(cli, "_model_facts", return_value={}):
+            self.assertEqual(cli._load_catalogue("ollama"), {"qwen3:32b": ["qwen3:32b", cli.LOCAL_MAX_OUTPUT]})
+            # Hosted providers still ignore a listing that shares nothing with the curated list.
+            self.assertIn("gpt-oss-120b", cli._load_catalogue("cerebras"))
 
 
 class ProviderConfigPathTests(unittest.TestCase):
@@ -262,6 +291,60 @@ class ProviderConfigPathTests(unittest.TestCase):
         self.assertEqual(cli.provider_config_path("codex"), cli.provider_config_path("openai-oauth"))
         with self.assertRaises(KeyError):
             cli.provider_config_path("nope")
+
+
+
+
+class ConsoleRoutingTests(unittest.TestCase):
+    def test_consumer_routes_startup_and_retry_output_without_redirecting_stdout(self):
+        import contextlib
+        import io
+
+        messages, output = [], io.StringIO()
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(api, "claude_executable", return_value="claude"), \
+             patch.object(api, "claude_chat", side_effect=[RuntimeError("temporary failure"), "answer"]), \
+             patch.object(api.time, "sleep"), contextlib.redirect_stdout(output):
+            service = api.AIService(
+                usage_state_path=str(Path(folder) / "usage.json"),
+                config_overrides={"provider": "claude"}, log=messages.append)
+            self.assertEqual(service.generate_content("p", max_retries=2), "answer")
+            print("foreground remains visible")
+        self.assertEqual(output.getvalue(), "foreground remains visible\n")
+        self.assertTrue(any("initialized" in m for m in messages))
+        self.assertTrue(any("temporary failure" in m for m in messages))
+
+    def test_oauth_cold_start_routes_child_output_and_keeps_failure_detail(self):
+        import contextlib
+        import io
+
+        messages, output = [], io.StringIO()
+        def launch(*args, **kwargs):
+            self.assertTrue(kwargs.get("capture_output"), "proxy subprocess leaks to terminal")
+            self.assertTrue(kwargs.get("text"))
+            return api.subprocess.CompletedProcess(args[0], 0, "proxy ready\n", "startup notice\n")
+
+        with patch.object(api, "_openai_oauth_proxy_running", side_effect=[False, True]), \
+             patch.object(api.shutil, "which", return_value="npx"), \
+             patch.object(api.subprocess, "run", side_effect=launch), contextlib.redirect_stdout(output):
+            api.ensure_openai_oauth_proxy(log=messages.append)
+        self.assertEqual(output.getvalue(), "")
+        self.assertIn("proxy ready", messages)
+        self.assertIn("startup notice", messages)
+        error = api.subprocess.CalledProcessError(1, "npx", output="proxy failed", stderr="port busy")
+        with patch.object(api, "_openai_oauth_proxy_running", return_value=False), \
+             patch.object(api.shutil, "which", return_value="npx"), \
+             patch.object(api.subprocess, "run", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, "port busy"):
+                api.ensure_openai_oauth_proxy(log=messages.append)
+
+    def test_oauth_service_forwards_its_diagnostic_callback(self):
+        messages = []
+        with tempfile.TemporaryDirectory() as folder, patch.object(api, "ensure_openai_oauth_proxy") as ensure:
+            api.AIService(usage_state_path=str(Path(folder) / "usage.json"),
+                          config_overrides={"provider": "openai-oauth", "use_openai_client": False},
+                          log=messages.append)
+        ensure.assert_called_once_with(log=messages.append)
 
 
 if __name__ == "__main__":

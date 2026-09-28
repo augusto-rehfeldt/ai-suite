@@ -1,6 +1,8 @@
 import os
 import json
 import unittest
+import tempfile
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,6 +12,25 @@ from ai_suite.service import AIService
 
 
 class OpenAIOAuthTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows console allocation check")
+    def test_real_background_child_has_no_console(self):
+        child = ai_service.subprocess.run(
+            [sys.executable, "-c", "import ctypes; print(ctypes.windll.kernel32.GetConsoleWindow())"],
+            capture_output=True, text=True, check=True, **ai_service.background_process_options())
+        self.assertEqual(child.stdout.strip(), "0")
+
+    def test_color_does_not_start_a_shell(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(cli.sys.stdout, "isatty", return_value=True), patch.object(cli.os, "system") as shell:
+            self.assertEqual(cli._color("test", "31"), "\033[31mtest\033[0m")
+        shell.assert_not_called()
+
+    def test_commandcode_listing_has_no_console(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(cli, "CMDC_MODELS_CACHE", Path(tmp) / "models"), patch.object(cli.shutil, "which", return_value="cmdc"), patch.object(cli.subprocess, "run") as run:
+            run.return_value.stdout = "test-model\n"
+            self.assertEqual(cli._live_model_ids("commandcode"), {"test-model"})
+        if os.name == "nt":
+            self.assertEqual(run.call_args.kwargs.get("creationflags"), ai_service.subprocess.CREATE_NO_WINDOW)
+
     def test_uses_local_proxy_without_reusing_provider_keys(self):
         config = Path(__file__).parents[1] / "ai_suite" / "config" / "ai_config_openai_oauth.json"
         with patch.object(ai_service, "ensure_openai_oauth_proxy") as ensure, patch.dict(
@@ -26,7 +47,8 @@ class OpenAIOAuthTests(unittest.TestCase):
             ai_service.shutil, "which", return_value="npx"
         ), patch.object(ai_service.subprocess, "run") as run:
             ai_service.ensure_openai_oauth_proxy()
-        run.assert_called_once_with(["npx", "openai-oauth@latest", "--detach"], check=True)
+        flags = {"creationflags": ai_service.subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        run.assert_called_once_with(["npx", "openai-oauth@latest", "--detach"], check=True, **flags)
 
     def test_loads_live_text_models_without_inventing_context(self):
         response = MagicMock()

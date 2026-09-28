@@ -53,6 +53,33 @@ class Endpoint(http.server.BaseHTTPRequestHandler):
 
 
 class StdlibTransportTests(unittest.TestCase):
+    def test_gateway_explicit_empty_ledgers_ignore_host_environment(self):
+        bad = Path(self.folder.name) / "unrelated.json"
+        bad.write_text("broken", encoding="utf-8")
+        with patch.dict(os.environ, AI_USAGE_STATE_PATH=str(bad), AI_GROQ_RATE_STATE_PATH=str(bad)):
+            service = api.AIService(allow_auth_prompt=False, config_overrides={
+                "provider": "http", "base_url": "http://127.0.0.1:1/v1", "api_key": "fake",
+                "use_openai_client": False, "usage_state_path": "", "groq_rate_state_path": ""})
+        self.assertEqual((service.usage_state_path, service.groq_rate_state_path), ("", ""))
+
+    def test_gateway_response_preserves_tools_and_provider_errors(self):
+        module = stdlib_module()
+        service = self.service(module, provider="http", use_openai_client=False)
+        payload = {"model": "m", "messages": [{"role": "user", "content": "hello"}],
+                   "tools": [{"type": "function", "function": {"name": "Read"}}],
+                   "stream": False, "max_tokens": 17}
+        Endpoint.replies = [(200, {"choices": [{"message": {"tool_calls": ["preserved"]}}]})]
+        with service.chat_completion_response(payload) as response:
+            self.assertEqual(json.load(response)["choices"][0]["message"]["tool_calls"], ["preserved"])
+        self.assertEqual(Endpoint.seen[0][2], payload)
+        self.assertEqual(Endpoint.seen[0][1]["Authorization"], "Bearer row-key")
+        import urllib.error
+        Endpoint.replies = [(429, {"error": "limited"})]
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            service.chat_completion_response(payload)
+        caught.exception.close()
+        self.assertEqual(len(Endpoint.seen), 2, "Gateway requests must not retry tool execution")
+
     def setUp(self):
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Endpoint)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -319,6 +346,28 @@ class CliIsolationTests(unittest.TestCase):
                 service.generate_content("hi", system="rules")
         self.assertEqual(chat.call_args.args[1], "hi")
         self.assertEqual(chat.call_args.kwargs["system"], "rules")
+
+
+class OpenAIBudgetTests(unittest.TestCase):
+    def service(self, folder, limits):
+        ledger = Path(folder) / "usage.json"
+        ledger.write_text(json.dumps({
+            "date": time.strftime("%Y-%m-%d"), "paused": True, "pause_reason": "pro budget",
+            "buckets": {"pro": {"tokens": 240375, "limit": 250000, "models": {}},
+                        "mini": {"tokens": 0, "limit": None, "models": {}}}}), encoding="utf-8")
+        return api.AIService(allow_auth_prompt=False, config_overrides={
+            "provider": "openai", "api_key": "fake", "use_openai_client": False,
+            "usage_state_path": str(ledger), "openai_daily_token_limits": limits})
+
+    def test_null_limit_uncaps_and_unpauses_todays_ledger(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = self.service(folder, {"pro": None, "mini": None})
+            self.assertFalse(service.has_budget_pause())
+            self.assertFalse(service._bucket_over_budget("pro", 10**12))
+
+    def test_configured_limit_still_pauses(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertTrue(self.service(folder, {"pro": 250000}).has_budget_pause())
 
 
 if __name__ == "__main__":
