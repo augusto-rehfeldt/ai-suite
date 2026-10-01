@@ -235,6 +235,54 @@ class CatalogueTests(unittest.TestCase):
             saved = json.loads(state.read_text())
             self.assertEqual((saved["hyper_model"], saved["hyper_model_review"]), ("glm-5.3", "kimi-k3"))
 
+    def test_choose_ai_offers_only_the_efforts_the_model_lists(self):
+        """Effort levels are per model (models.dev); a remembered one the model lacks is dropped."""
+        cli._CATALOGUE_CACHE.clear()
+        catalogue = {"hyper": {"models": {
+            "glm-5.3": {"reasoning_options": [{"type": "toggle"}, {"type": "effort", "values": ["low", "high"]}]},
+            "kimi-k3": {"reasoning_options": [{"type": "budget_tokens", "min": 1, "max": 9}]}}},
+            "minimax": {"models": {"glm-5.3": {"reasoning_options": [{"type": "effort", "values": ["low"]}]}}}}
+        env = {k: v for k, v in os.environ.items() if not k.startswith("AI_")}
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(cli, "_live_model_ids", return_value=None), \
+                patch.object(cli, "_models_dev", return_value=catalogue), \
+                patch.object(cli, "_artificial_analysis", return_value=[]), \
+                patch.object(cli, "_refresh_missing_intelligence"), \
+                patch.dict(os.environ, env, clear=True):
+            self.assertEqual(cli._effort_levels("hyper", "glm-5.3"), ["low", "high"])
+            self.assertEqual(cli._effort_levels("hyper", "kimi-k3"), [])     # thinks, but takes no level
+            self.assertEqual(cli._effort_levels("minimax", "glm-5.3"), [])   # its transport sends none
+            state = Path(tmp) / "state.json"
+            state.write_text(json.dumps({"provider": "hyper", "hyper_model": "glm-5.3",
+                                         "hyper_model_review": "kimi-k3",
+                                         "hyper_effort": "high", "hyper_effort_review": "high"}))
+            with patch("builtins.input", side_effect=AssertionError("auto mode asked")):
+                cli.choose_ai(None, "auto", state, ("work", "review"))
+            self.assertEqual(os.environ["AI_WRITING_EFFORT"], "high")
+            self.assertNotIn("AI_REVIEW_EFFORT", os.environ)
+            # Asked once, for the one model with levels; the caller that owns effort is never asked.
+            with patch.object(cli, "_arrow_menu", side_effect=["glm-5.3", "kimi-k3", "low"]) as menu:
+                cli.choose_ai("hyper", "review", state, ("work", "review"))
+            self.assertEqual([rid for rid, _ in menu.call_args_list[2].args[1]], ["default", "low", "high"])
+            self.assertEqual(os.environ["AI_WRITING_EFFORT"], "low")
+            self.assertEqual(json.loads(state.read_text())["hyper_effort"], "low")
+            with patch.object(cli, "_arrow_menu", side_effect=["glm-5.3", "kimi-k3"]):
+                cli.choose_ai("hyper", "review", state, ("work", "review"), effort=False)
+            self.assertNotIn("AI_WRITING_EFFORT", os.environ)
+            # A role the state has never seen starts on the first role's picks, so a
+            # consumer that adds a review role keeps running what it ran before.
+            state.write_text(json.dumps({"provider": "hyper", "hyper_model": "glm-5.3", "hyper_effort": "high"}))
+            cli.choose_ai(None, "auto", state, ("writing", "review"))
+            self.assertEqual((os.environ["AI_REVIEW_MODEL"], os.environ["AI_REVIEW_EFFORT"]), ("glm-5.3", "high"))
+            # Only an answered menu is remembered: the review role still inherits next time.
+            self.assertNotIn("hyper_effort_review", json.loads(state.read_text()))
+            self.assertEqual(cli._effort_levels("gpt4free", "glm-5.3"), [])  # fuzzy name match, unverified server
+            # models.dev unreachable: the remembered effort stands, in the run and on disk.
+            with patch.object(cli, "_models_dev", return_value={}):
+                cli.choose_ai(None, "auto", state, ("writing", "review"))
+            self.assertEqual(os.environ["AI_WRITING_EFFORT"], "high")
+            self.assertEqual(json.loads(state.read_text())["hyper_effort"], "high")
+
     def test_new_live_models_join_the_menu_when_models_dev_knows_their_output(self):
         cli._CATALOGUE_CACHE.clear()
         facts = {"brand-new": {"limit": {"output": 65536}}}
@@ -243,6 +291,29 @@ class CatalogueTests(unittest.TestCase):
             models = cli._load_catalogue("hyper")
         self.assertEqual(models["brand-new"], ["brand-new", 65536])
         self.assertNotIn("an-image-model", models)
+
+    def test_claude_menu_adds_each_familys_newest_model_from_models_dev(self):
+        """A Claude release reaches the menu without a config edit; aliases stay."""
+        cli._CATALOGUE_CACHE.clear()
+        catalogue = {"anthropic": {"models": {
+            "claude-sonnet-5": {"family": "claude-sonnet", "release_date": "2026-06-29"},
+            "claude-sonnet-6": {"family": "claude-sonnet", "release_date": "2027-02-01"},
+            "claude-haiku-4-5": {"family": "claude-haiku", "release_date": "2025-10-15"},
+            "claude-haiku-4-5-20251001": {"family": "claude-haiku", "release_date": "2025-10-15"},
+            "claude-opus-5-5": {"family": "claude-opus", "release_date": "2026-09-22"},
+            "claude-fable-5": {"family": "claude-fable", "release_date": "2027-03-01"},
+        }}}
+        with patch.object(cli, "_models_dev", return_value=catalogue):
+            self.assertEqual(cli._live_model_ids("claude"),
+                             {"claude-sonnet-6", "claude-haiku-4-5", "claude-opus-5-5", "claude-fable-5"})
+            models = cli._load_catalogue("claude")
+        self.assertEqual(models["claude-sonnet-6"], ["claude-sonnet-6", 0])
+        self.assertIn("claude-sonnet-5", models)  # curated ids are never dropped
+        self.assertIn("opus", models)
+        # The config lists haiku only as its dated snapshot: the bare id is no new model.
+        self.assertNotIn("claude-haiku-4-5", models)
+        # A longer curated id (claude-fable-5-1) is a different model, not a snapshot.
+        self.assertIn("claude-fable-5", models)
 
     def test_opencode_calls_carry_a_session_id(self):
         """Without x-opencode-session opencode.ai answers 400 MissingSessionID."""

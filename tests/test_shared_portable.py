@@ -329,6 +329,16 @@ class CliIsolationTests(unittest.TestCase):
         with self.assertRaisesRegex(api.IncompleteGenerationError, "32000 reasoning tokens"):
             self.run_cli(api.opencode_chat, stdout="\n".join(map(json.dumps, thought_out)))
 
+    def test_each_cli_takes_the_effort_as_its_own_flag(self):
+        answer = json.dumps({"type": "text", "part": {"text": "ok"}})
+        for chat, flag in ((api.claude_chat, "--effort"), (api.commandcode_chat, "--effort"),
+                           (api.opencode_chat, "--variant")):
+            _text, call = self.run_cli(chat, stdout=answer, effort="high")
+            args = call.args[0]
+            self.assertEqual(args[args.index(flag) + 1], "high", chat.__name__)
+            _text, call = self.run_cli(chat, stdout=answer)
+            self.assertNotIn(flag, call.args[0], chat.__name__)
+
     def test_gui_hosts_find_npm_installed_clis(self):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / "cmdc.cmd").write_text("")

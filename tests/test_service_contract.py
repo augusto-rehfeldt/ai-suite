@@ -80,7 +80,42 @@ class ServiceContractTests(unittest.TestCase):
             client.client = Mock()
             client.client.chat.completions.create.return_value = {'choices': [{'message': {'content': 'answer'}}]}
             client.generate_content('question', model_type='review')
-            self.assertEqual(client.client.chat.completions.create.call_args.kwargs['extra_body'], {'reasoning': {'effort': 'low'}})
+            # the ChatGPT sign-in proxy reads only `reasoning_effort`; the nested object was dropped unread
+            self.assertEqual(client.client.chat.completions.create.call_args.kwargs['extra_body'], {'reasoning_effort': 'low'})
+
+    def test_effort_goes_out_in_the_shape_each_endpoint_reads(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def made(**config):
+                # the menu's picks arrive through the environment
+                with patch.dict(api.os.environ, {'AI_WRITING_EFFORT': 'high', 'AI_REVIEW_EFFORT': 'low'}), \
+                        patch.object(api, 'claude_executable', return_value='claude'):
+                    client = api.AIService(None, str(Path(folder) / 'usage.json'), allow_auth_prompt=False,
+                                           config_overrides={'api_key': 'fixture', 'writing_model': 'w', 'review_model': 'r',
+                                                             'groq_rate_state_path': str(Path(folder) / 'groq.json'), **config})
+                client.client = Mock()
+                client.client.chat.completions.create.return_value = {'choices': [{'message': {'content': 'answer'}}]}
+                return client
+
+            def sent(client, **kwargs):
+                client.generate_content('question', **kwargs)
+                return client.client.chat.completions.create.call_args.kwargs.get('extra_body')
+
+            # OpenRouter itself takes the nested object; other hosts on its branch read reasoning_effort
+            self.assertEqual(sent(made(provider='openrouter', base_url='https://openrouter.ai/api/v1')),
+                             {'reasoning': {'effort': 'high'}})
+            go = made(provider='openrouter', base_url='https://opencode.ai/zen/go/v1')
+            self.assertEqual(sent(go, model_type='review'), {'reasoning_effort': 'low'})
+            # the effort was picked for the role's own model: a judge on another model keeps its default
+            self.assertIsNone(sent(go, model_type='review', model='judge'))
+            # an override naming a role's model, in any case, takes that role's effort
+            self.assertEqual(sent(go, model='R'), {'reasoning_effort': 'low'})
+            self.assertEqual(sent(made(provider='grok', base_url='https://api.x.ai/v1')), {'reasoning_effort': 'high'})
+            cli = made(provider='claude')
+            with patch.object(api, 'claude_chat', return_value='done') as chat:
+                cli.generate_content('question')
+                cli.generate_content('question', model='judge')
+            self.assertEqual([c.kwargs.get('effort') for c in chat.call_args_list], ['high', None])
+            self.assertFalse(made(provider='minimax').set_reasoning_effort('high'))
 
     def test_usage_limit_is_waited_out_never_returned(self):
         client = object.__new__(api.AIService)

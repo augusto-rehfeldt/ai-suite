@@ -47,6 +47,22 @@ Up/Down or W/S, PgUp/PgDn move, Space selects/deselects, Enter confirms (the cur
 nothing is selected), Esc keeps the default, Tab re-sorts by context, AA, then
 aggregate. `multi=True` picks an ordered list (comma-joined; article-writer's backups).
 Off a console (piped, non-Windows) they fall back to the typed numbered menu.
+After each role's model, `choose_ai` shows an effort menu of that model's own levels:
+models.dev `reasoning_options` of type `effort` (`_effort_levels`), plus `default`. No
+menu when the model lists none or the config provider is outside
+`service.EFFORT_PROVIDERS` (google, groq, minimax). Picks are remembered per provider
+(`<provider>_effort[_<role>]`) and exported as `AI_WRITING_EFFORT` / `AI_REVIEW_EFFORT`;
+a role new to the state file starts on the first role's model and effort. The effort
+menu is console-only: a typed prompt would eat a piped run's next scripted answer.
+Wire shape (`AIService._reasoning_options`): `reasoning: {effort}` for the Responses API
+and openrouter.ai, `reasoning_effort` for every other chat endpoint (the ChatGPT sign-in
+proxy reads nothing else), `--effort` for the claude and Command Code CLIs, `--variant`
+for OpenCode. A `model=` override takes the effort of the role whose model it names; on
+any other model (a judge) it carries none. Only an answered menu is written to the state
+file, and with models.dev unreachable the remembered effort stands. `gpt4free` gets no
+effort menu (fuzzy facts, server behaviour unchecked). Live-checked 2026-10-01: the claude
+`--effort` and OpenCode `--variant` flags; the `reasoning_effort` field rests on the
+openai-oauth proxy source and models.dev's provider SDK types, not on a measured difference.
 
 - `claude` — the Claude Code CLI in print mode, on the user's subscription, no
   key. The prompt goes in **on stdin, never in argv**: Windows caps a command
@@ -121,7 +137,8 @@ private-method or SDK monkeypatches, and add them test-first in
 `allow_auth_prompt`, `client_max_retries`, `log` (optional per-instance diagnostic callback;
 normal console output remains the default), `config_overrides` (merged over the file,
 explicit `api_key` wins; config-only when no file, then `provider` is required),
-`providers.provider_config_path`, `set_reasoning_effort(writing, review)`,
+`providers.provider_config_path`, `set_reasoning_effort(writing, review)` (it overrides the
+menu's `AI_WRITING_EFFORT` / `AI_REVIEW_EFFORT`), `choose_ai(effort=False)`,
 `generate_content(system=, temperature=, wait_for_limits=)`, `embed()` and `last_usage`.
 Config keys `stream` and `token_param` are consumer-facing too.
 

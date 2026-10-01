@@ -27,6 +27,14 @@ Artificial Analysis index or aggregate score. A "Loading … models" line holds 
 bottom row while catalogues are fetched. Piped or off Windows it is a typed numbered
 menu; `mode="auto"` asks nothing and reuses the last picks.
 
+After each model comes a reasoning-effort menu listing only the levels that model takes
+(models.dev), plus `default` for the provider's own. Models without effort levels, and
+providers whose transport sends none (Gemini, Groq, MiniMax), skip it. With several roles
+(`roles=("writing", "review")`) each role gets its own model and effort; a new role starts
+on the first role's picks. `AIService` reads the picks from `AI_WRITING_EFFORT` /
+`AI_REVIEW_EFFORT`; `choose_ai(effort=False)` skips the menu for a script with its own
+effort option, and `set_reasoning_effort()` overrides it.
+
 Model rows read `ctx | $in/$out | AA -> score` from models.dev and, with
 `ARTIFICIAL_ANALYSIS_API_KEY`, the Artificial Analysis index. Defaults worth knowing:
 `claude` writes on `claude-opus-5-5`, `openai-oauth` on `gpt-6-sol`.
