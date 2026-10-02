@@ -261,9 +261,10 @@ class CatalogueTests(unittest.TestCase):
             self.assertEqual(os.environ["AI_WRITING_EFFORT"], "high")
             self.assertNotIn("AI_REVIEW_EFFORT", os.environ)
             # Asked once, for the one model with levels; the caller that owns effort is never asked.
-            with patch.object(cli, "_arrow_menu", side_effect=["glm-5.3", "kimi-k3", "low"]) as menu:
+            # Each effort menu follows its own model's menu, before the next role's model.
+            with patch.object(cli, "_arrow_menu", side_effect=["glm-5.3", "low", "kimi-k3"]) as menu:
                 cli.choose_ai("hyper", "review", state, ("work", "review"))
-            self.assertEqual([rid for rid, _ in menu.call_args_list[2].args[1]], ["default", "low", "high"])
+            self.assertEqual([rid for rid, _ in menu.call_args_list[1].args[1]], ["default", "low", "high"])
             self.assertEqual(os.environ["AI_WRITING_EFFORT"], "low")
             self.assertEqual(json.loads(state.read_text())["hyper_effort"], "low")
             with patch.object(cli, "_arrow_menu", side_effect=["glm-5.3", "kimi-k3"]):

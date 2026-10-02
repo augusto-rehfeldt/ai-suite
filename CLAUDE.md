@@ -47,7 +47,7 @@ Up/Down or W/S, PgUp/PgDn move, Space selects/deselects, Enter confirms (the cur
 nothing is selected), Esc keeps the default, Tab re-sorts by context, AA, then
 aggregate. `multi=True` picks an ordered list (comma-joined; article-writer's backups).
 Off a console (piped, non-Windows) they fall back to the typed numbered menu.
-After each role's model, `choose_ai` shows an effort menu of that model's own levels:
+Right after each role's model (before the next role's model), `choose_ai` shows an effort menu of that model's own levels:
 models.dev `reasoning_options` of type `effort` (`_effort_levels`), plus `default`. No
 menu when the model lists none or the config provider is outside
 `service.EFFORT_PROVIDERS` (google, groq, minimax). Picks are remembered per provider
