@@ -21,8 +21,10 @@ omitting it keeps normal console logging. Generation failures still raise.
 
 On a Windows console `choose_ai` asks for the provider, then one model per role, with
 arrow-key menus: 20 rows at a time with scrolling, the remembered pick preselected.
-Up/Down or W/S move, Space selects or deselects, Enter confirms (the row under the cursor
-if nothing is selected), Esc keeps the default, Tab re-sorts models by price, context,
+Up/Down move. Typing filters the list to ids containing the typed letters (highlighted;
+Backspace erases). Space selects or deselects, Enter confirms (the row under the cursor
+if nothing is selected or a filter is typed), Esc clears the filter, else keeps the
+default, Tab re-sorts models by price, context,
 Artificial Analysis index or aggregate score. A "Loading … models" line holds the
 bottom row while catalogues are fetched. Piped or off Windows it is a typed numbered
 menu; `mode="auto"` asks nothing and reuses the last picks.

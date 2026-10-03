@@ -420,7 +420,24 @@ class ArrowMenuTests(unittest.TestCase):
 
     def test_scrolls_past_the_window_and_space_moves_the_selection(self):
         self.assertEqual(self._run("\xe0P" * 22 + " \r"), "m25")
-        self.assertEqual(self._run("s" * 23 + "W \r"), "m25")  # W/S move like Up/Down
+
+    def test_typing_filters_rows_and_highlights_the_match(self):
+        self.assertEqual(self._run("m2\xe0P\r"), "m21")       # m20..m29 left; Down, Enter
+        self.assertEqual(self._run("M25\r"), "m25")           # case-insensitive, cursor row wins
+        self.assertEqual(self._run("m29\x08\x0805\r"), "m05")  # Backspace widens again
+        self.assertEqual(self._run("zz\r\x1b\r"), "m03")      # no match: Enter waits; Esc clears
+        self.assertEqual(self._run("m1\x1b\x1b"), "m03")      # second Esc keeps the default
+        with patch.dict(os.environ, {"NO_COLOR": ""}):
+            msvcrt = Mock(getwch=Mock(side_effect=list("07\r")))
+            tty = Mock(isatty=Mock(return_value=True))
+            with patch.object(cli.os, "name", "nt"), patch.object(cli.os, "system"), \
+                    patch.dict("sys.modules", {"msvcrt": msvcrt}), \
+                    patch.object(cli.sys, "stdin", tty), patch.object(cli.sys, "stdout", tty), \
+                    patch("builtins.print") as out:
+                cli._arrow_menu("Models:", [(m, f"{m}  {label}") for m, label in self.ROWS], "m03")
+        frame = out.call_args_list[-2].args[0]
+        self.assertIn("m\033[7m07\033[27m", frame)
+        self.assertNotIn("m03", frame)
 
     def test_deselecting_falls_back_to_the_cursor_row(self):
         self.assertEqual(self._run(" \xe0P\r"), "m04")        # unmark m03, move, Enter

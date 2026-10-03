@@ -43,8 +43,10 @@ Intelligence Index (`providers._intelligence`, cached a day in
 `_gradient` colors each from red (kept bright for low vision) to bright green in 24-bit color. `_pick_model`
 sorts by price first. On a Windows console the provider and model menus are
 `_arrow_menu`: `MENU_ROWS` (20) rows at a time with scrolling, the default preselected,
-Up/Down or W/S, PgUp/PgDn move, Space selects/deselects, Enter confirms (the cursor row if
-nothing is selected), Esc keeps the default, Tab re-sorts by context, AA, then
+Up/Down, PgUp/PgDn move, typed letters filter rows to ids containing them (case-insensitive,
+match in reverse video, Backspace erases), Space selects/deselects, Enter confirms (the
+cursor row if nothing is selected or a filter is typed), Esc clears the filter, else keeps
+the default, Tab re-sorts by context, AA, then
 aggregate. `multi=True` picks an ordered list (comma-joined; article-writer's backups).
 Off a console (piped, non-Windows) they fall back to the typed numbered menu.
 Right after each role's model (before the next role's model), `choose_ai` shows an effort menu of that model's own levels:
