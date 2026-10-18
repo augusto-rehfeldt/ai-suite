@@ -45,10 +45,23 @@ class OpenAIOAuthTests(unittest.TestCase):
     def test_starts_missing_proxy_with_npx(self):
         with patch.object(ai_service, "_openai_oauth_proxy_running", side_effect=[False, True]), patch.object(
             ai_service.shutil, "which", return_value="npx"
-        ), patch.object(ai_service.subprocess, "run") as run:
+        ), patch.object(ai_service, "OPENAI_OAUTH_PATCHED", Path("missing-openai-oauth.cmd")), patch.object(
+            ai_service.subprocess, "run"
+        ) as run:
             ai_service.ensure_openai_oauth_proxy()
         flags = {"creationflags": ai_service.subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         run.assert_called_once_with(["npx", "openai-oauth@latest", "--detach"], check=True, **flags)
+
+    def test_prefers_patched_proxy_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            patched = Path(tmp, "openai-oauth.cmd")
+            patched.write_text("", encoding="utf-8")
+            with patch.object(ai_service, "_openai_oauth_proxy_running", side_effect=[False, True]), patch.object(
+                ai_service.shutil, "which", return_value=None
+            ), patch.object(ai_service, "OPENAI_OAUTH_PATCHED", patched), patch.object(ai_service.subprocess, "run") as run:
+                ai_service.ensure_openai_oauth_proxy()
+        flags = {"creationflags": ai_service.subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        run.assert_called_once_with([str(patched), "--detach"], check=True, **flags)
 
     def test_loads_live_text_models_without_inventing_context(self):
         response = MagicMock()
