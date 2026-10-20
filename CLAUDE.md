@@ -31,7 +31,9 @@ models. Offline, the curated list shows as is.
 `providers.choose_ai` is the one provider/model menu for every AIService script:
 mathforge and music writer call it with their own state file and roles.
 opencode.ai rejects calls without an `x-opencode-session` header;
-`AIService._extra_headers` adds one per service.
+`AIService._extra_headers` adds one per service. Every request also gets a browser-style
+`User-Agent`: Cloudflare (opencode.ai, api.commandcode.ai) answers Python's default with 403
+"error code: 1010".
 Menus print context, max output and list price per 1M tokens from models.dev
 (`providers._model_facts`; opencode's `~/.cache/opencode/models.json` when under a day
 old, else live). Display only: the config's `max_output` is still the cap sent.

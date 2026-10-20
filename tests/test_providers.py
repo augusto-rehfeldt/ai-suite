@@ -142,6 +142,49 @@ FREE_TIER_PROVIDERS = ("cerebras", "mistral", "cloudflare", "sambanova", "chutes
                        "ollama", "lmstudio")
 
 
+class ModelMenuSortTests(unittest.TestCase):
+    def test_score_is_the_default_and_missing_facts_go_last(self):
+        rows = [("unknown", {"intelligence": 99}),
+                ("known", {"limit": {"context": 1000}, "cost": {"input": 1, "output": 1}, "intelligence": 10})]
+        captured = {}
+
+        def fake_menu(heading, options, default, legend, sorts=None, **kwargs):
+            captured["sorts"] = sorts
+            return default
+
+        with patch.object(cli, "_arrow_menu", fake_menu), \
+                patch.object(cli, "_artificial_analysis", return_value=[{}]), \
+                patch.dict(os.environ, {"NO_COLOR": "1"}):
+            cli._pick_model("p", rows, "known", "", "")
+        self.assertEqual(captured["sorts"][0][0], "aggregate score")
+        self.assertEqual(captured["sorts"][0][1], ["known", "unknown"])
+        self.assertTrue(all(order[-1] == "unknown" for _, order in captured["sorts"]))
+
+
+    def test_only_the_facts_some_row_has_get_a_sort(self):
+        rows = [("a", {"limit": {"context": 1000}, "cost": {"input": 1, "output": 1}}),
+                ("b", {"limit": {"context": 2000}, "cost": {"input": 2, "output": 2}})]
+        captured = {}
+
+        def fake_menu(heading, options, default, legend, sorts=None, **kwargs):
+            captured["sorts"] = sorts
+            return default
+
+        with patch.object(cli, "_arrow_menu", fake_menu), \
+                patch.object(cli, "_artificial_analysis", return_value=[]), \
+                patch.dict(os.environ, {"NO_COLOR": "1"}):
+            cli._pick_model("p", rows, "a", "", "")
+        names = [name for name, _ in captured["sorts"]]
+        self.assertEqual(names[0], "aggregate score")
+        self.assertNotIn("intelligence", names, "no row has a score, so no sort may promise one")
+
+    def test_the_facts_the_menu_shows_are_the_facts_the_sort_counts(self):
+        info = {"limit": {"context": 1e6}, "cost": {"input": 1, "output": 1}}
+        with patch.object(cli, "_artificial_analysis", return_value=[]):
+            self.assertEqual(cli._missing(info), 0)
+            self.assertEqual(cli._missing({"cost": {"input": 1, "output": 1}}), 1)
+
+
 class CatalogueTests(unittest.TestCase):
     def test_every_provider_has_a_config_that_names_the_same_provider(self):
         for provider, path in cli.PROVIDER_CONFIG_MAP.items():
@@ -323,9 +366,11 @@ class CatalogueTests(unittest.TestCase):
         headers = service._extra_headers()
         self.assertEqual(len(headers["x-opencode-session"]), 32)
         self.assertEqual(service._extra_headers(), headers)  # one session per service
+        self.assertNotIn("python", headers["User-Agent"].lower())  # Cloudflare 1010 blocks Python's
         other = _service({"provider": "openrouter", "base_url": "https://openrouter.ai/api/v1",
                           "api_key": "k", "writing_model": "m", "review_model": "m"})
         self.assertNotIn("x-opencode-session", other._extra_headers())
+        self.assertIn("Mozilla", other._extra_headers()["User-Agent"])
 
 
 class PublicProviderOptionsTests(unittest.TestCase):
@@ -450,6 +495,16 @@ class ArrowMenuTests(unittest.TestCase):
         # m00 -> m01, Tab to reversed order (cursor stays on m01), Up -> m02
         self.assertEqual(self._run("\xe0P\t\xe0H\r", default="", sorts=sorts), "m02")
 
+    def test_escape_can_signal_back_without_confirming_a_selection(self):
+        for keys in ("\x1b", "m2\x1b"):
+            with self.subTest(keys=repr(keys)):
+                with self.assertRaises(cli.MenuBack):
+                    self._run(keys, back=True)
+
+    def test_ctrl_c_still_quits_when_escape_goes_back(self):
+        with self.assertRaises(KeyboardInterrupt):
+            self._run("\x03", back=True)
+
     def test_multi_keeps_pick_order_and_allows_none(self):
         # m03,m05 preselected; toggle m03 off, move to m06 and pick it: order is pick order
         self.assertEqual(self._run(" " + "\xe0P" * 3 + " \r", default="m03,m05", multi=True),
@@ -487,6 +542,18 @@ class CliCatalogueTests(unittest.TestCase):
     def test_commandcode_listing_skips_headings(self):
         with patch.object(cli, "_cli_listing", return_value=self.CMDC):
             self.assertEqual(cli._live_model_ids("commandcode"), {"deepseek/deepseek-v4.1-flash", "claude-sonnet-5"})
+
+    def test_commandcode_listing_stops_before_decision_models(self):
+        listing = self.CMDC + ("\nDecision models (headless only)\n"
+                               "typesafe/jev  typed questions in, probabilities out\n")
+        with patch.object(cli, "_cli_listing", return_value=listing):
+            self.assertEqual(cli._live_model_ids("commandcode"), {"deepseek/deepseek-v4.1-flash", "claude-sonnet-5"})
+
+    def test_commandcode_listing_cuts_only_the_heading(self):
+        # A description that happens to say "Decision models" must not truncate the catalog.
+        listing = "Open Source\n\nfoo/bar  our Decision models helper\nbaz/qux  ok\n"
+        with patch.object(cli, "_cli_listing", return_value=listing):
+            self.assertEqual(cli._live_model_ids("commandcode"), {"foo/bar", "baz/qux"})
 
     def test_zen_uses_opencode_cli_listing(self):
         """The gateway's /models still names retired free models; OpenCode's CLI does not."""
